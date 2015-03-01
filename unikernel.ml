@@ -30,7 +30,7 @@ module Main (C:CONSOLE) (S:STACKV4) = struct
     let usage_buf = Cstruct.sub (Io_page.(to_cstruct (get 1))) 0 usage_mlen in
     Cstruct.blit_from_string usage_msg 0 usage_buf 0 usage_mlen;
 
-    Lwt_list.iter_s (fun ip -> C.log_s console 
+    (* Lwt_list.iter_s (fun ip -> C.log_s console 
       (sprintf "IP address: %s\n" 
         (Ipaddr.V4.to_string ip))) (S.IPV4.get_ip (S.ipv4 s))
     >>
@@ -90,7 +90,22 @@ module Main (C:CONSOLE) (S:STACKV4) = struct
       >>=
       cmd_loop 0 flow
     );
+    *)
+    let ip = List.hd (S.IPV4.get_ip (S.ipv4 s)) in
+    let rec snd outfl n = match n with
+    | 0 -> C.log_s console (red "iperf client: done") >> T.close outfl
+    | _ -> 
+        T.write outfl buf >>
+        snd outfl (n - 1)
+    in
 
+    let sendth dst port =
+    S.TCPV4.create_connection (S.tcpv4 s) (dst, port) >>= function
+    | `Ok outfl -> C.log_s console (red "connected") >> snd outfl 200000
+    | `Error e -> C.log_s console (red "connect: error")
+    in
+    lwt _ = sendth ip iperf_rx_port in
+    ();
 
     C.log_s console
       (green "ready to receive iperf connections on port %d" iperf_rx_port)
