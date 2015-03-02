@@ -20,12 +20,15 @@ let iptest = Ipaddr.V4.of_string_exn "127.0.0.1"
 let iperf_rx_port = 5001
 let cmd_port = 8080
 
-module Main (C:CONSOLE) (S:STACKV4) = struct
+module Main (C:CONSOLE) (S1:STACKV4) (S2:STACKV4) = struct
 
-  module T  = S.TCPV4
-  module CH = Channel.Make(T)
+  module T1  = S1.TCPV4
+  module CH1 = Channel.Make(T1)
 
-  let start console s =
+  module T2  = S2.TCPV4
+  module CH2 = Channel.Make(T2)
+
+  let start console s1 s2 =
 
     let buf = Cstruct.sub (Io_page.(to_cstruct (get 1))) 0 mlen in
     Cstruct.blit_from_string msg 0 buf 0 mlen;
@@ -75,18 +78,18 @@ module Main (C:CONSOLE) (S:STACKV4) = struct
     C.log_s console
       (green "ready to receive iperf connections on port %d" iperf_rx_port)
     >>= fun () ->
-    S.listen_tcpv4 s iperf_rx_port (
+    S1.listen_tcpv4 s1 iperf_rx_port (
       let rec iperf_rx_loop n f =
         fun () ->
-        T.read f
+        T1.read f
         >>= function
         | `Ok b ->
 	   return() >>= iperf_rx_loop (n + (Cstruct.len b)) f
-        | `Eof -> T.close f >> C.log_s console (red "iperf received: %d bytes" n)
+        | `Eof -> T1.close f >> C.log_s console (red "iperf received: %d bytes" n)
         | `Error e -> C.log_s console (red "read: error")
       in
       fun flow ->
-        let dst, dst_port = T.get_dest flow in
+        let dst, dst_port = T1.get_dest flow in
         C.log_s console
           (green "new iperf connection from %s %d" 
             (Ipaddr.V4.to_string dst) dst_port
@@ -95,7 +98,7 @@ module Main (C:CONSOLE) (S:STACKV4) = struct
         iperf_rx_loop 0 flow
     );
 
-    let ip = List.hd (S.IPV4.get_ip (S.ipv4 s)) in
+    let ip = List.hd (S1.IPV4.get_ip (S1.ipv4 s1)) in
     C.log_s console
       (sprintf "IP address: %s\n" (Ipaddr.V4.to_string ip))
     >>
@@ -104,23 +107,23 @@ module Main (C:CONSOLE) (S:STACKV4) = struct
     >>= fun () ->
     (
       let rec snd outfl n = match n with
-      | 0 -> C.log_s console (red "iperf client: done") >> T.close outfl
+      | 0 -> C.log_s console (red "iperf client: done") >> T2.close outfl
       | _ -> 
-          T.write outfl buf >>
+          T2.write outfl buf >>
           snd outfl (n - 1)
       in
 
       let sendth dst port =
       C.log_s console (red "try to connect to %s %d" (Ipaddr.V4.to_string dst) port) >>
-      S.TCPV4.create_connection (S.tcpv4 s) (dst, port) >>= function
+      S2.TCPV4.create_connection (S2.tcpv4 s2) (dst, port) >>= function
       | `Ok outfl -> C.log_s console (red "connected") >> snd outfl 200000
       | `Error e -> C.log_s console (red "connect: error")
       in
 
-	  let _ = sendth iptest iperf_rx_port in
+	  let _ = sendth ip iperf_rx_port in
 	  ()
     );
 
-    S.listen s
+    S1.listen s1
 end
 
